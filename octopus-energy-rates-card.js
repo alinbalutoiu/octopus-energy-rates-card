@@ -123,14 +123,11 @@ class OctopusEnergyRatesCard extends HTMLElement {
             card.appendChild(this.content);
             this.appendChild(card);
         }
-
-        // Initialise the lastRefreshTimestamp
         if (!this.lastRefreshTimestamp) {
             // Store the timestamp of the last refresh
             this.lastRefreshTimestamp = 0;
         }
 
-        // Check if the interval has passed
         const currentTime = Date.now();
         const cardRefreshIntervalSecondsInMilliseconds = config.cardRefreshIntervalSeconds * 1000;
         if (!(currentTime - this.lastRefreshTimestamp >= cardRefreshIntervalSecondsInMilliseconds)) {
@@ -167,9 +164,22 @@ class OctopusEnergyRatesCard extends HTMLElement {
             }
         }
 
-        const lowlimit = config.lowlimit;
+        var lowlimit = config.lowlimit;
         var mediumlimit = config.mediumlimit;
         var highlimit = config.highlimit;
+
+        // Check if we've received a number, if not, assume they are entities
+        // and read them from the state
+        if (isNaN(lowlimit)) {
+            lowlimit = parseFloat(hass.states[lowlimit].state)
+        }
+        if (isNaN(mediumlimit)) {
+            mediumlimit = parseFloat(hass.states[mediumlimit].state)
+        }
+        if (isNaN(highlimit)) {
+            highlimit = parseFloat(hass.states[highlimit].state)
+        }
+
         const unitstr = config.unitstr;
         const roundUnits = config.roundUnits;
         const showpast = config.showpast;
@@ -194,11 +204,34 @@ class OctopusEnergyRatesCard extends HTMLElement {
         const limitHighMult = config.highLimitMultiplier;
         const limitMedMult = config.mediumLimitMultiplier;
 
+        // Create an empty array to store the parsed attributes
+        var additionalVariableLimits = [];
+        const additionalVariableLimitsEntities = config.additionalVariableLimits && Object.keys(config.additionalVariableLimits) || [];
+        // Iterate through each entity in additionalVariableLimitsEntities
+        for (const entityId of additionalVariableLimitsEntities) {
+            const limitExtraData = config.additionalVariableLimits[entityId] || [];
+            const backgroundColour = limitExtraData.backgroundColour || "";
+            const timePrefix = limitExtraData.prefix || "";
+
+            const limit = parseFloat(hass.states[entityId].state);
+            if (!isNaN(limit)) {
+                additionalVariableLimits.push({
+                    limit: limit,
+                    color: backgroundColour,
+                    timePrefix: timePrefix,
+                })
+            } else {
+                console.warn("Couldn't parse entity state ${entityId} as a float")
+            }
+        }
+
+
         if (!(limitEntity == null)) {
             const limitAve = parseFloat(limitEntityState.state);
             mediumlimit = limitAve * limitMedMult;
             highlimit = limitAve * limitHighMult;
         };
+
 
         // Combine the data sources
         if (typeof (paststate) != 'undefined' && paststate != null) {
@@ -317,6 +350,15 @@ class OctopusEnergyRatesCard extends HTMLElement {
                     targetTimePrefix = targetTime.timePrefix ? targetTimePrefix + targetTime.timePrefix : targetTimePrefix;
                 }
             });
+            // Check if we've got any variable limits defined which will take precedence
+            additionalVariableLimits.forEach(function (targetLimit) {
+                if (key.value_inc_vat <= targetLimit.limit) {
+                    isTargetTime = true;
+                    targetTimeBackgroundColor = "' style='background-color: " + targetLimit.color + ";";
+                    targetTimePrefix = targetLimit.timePrefix ? targetTimePrefix + targetLimit.timePrefix : targetTimePrefix;
+                }
+            });
+
             // Add the extra space at the end of the prefix if it's not empty
             targetTimePrefix = targetTimePrefix ? targetTimePrefix + " " : targetTimePrefix;
             var isCurrentTime = false;
@@ -388,6 +430,9 @@ class OctopusEnergyRatesCard extends HTMLElement {
 
         const defaultConfig = {
             targetTimesEntities: null,
+            // Additional limits specified in a similar format as targetTimesEntities
+            // but they take input_numbers as input
+            additionalVariableLimits: null,
             // Controls how many columns the rates split in to
             cols: 1,
             // Show rates that already happened in the card
@@ -425,7 +470,6 @@ class OctopusEnergyRatesCard extends HTMLElement {
             multiplier: 100,
             // Limit display to next X rows
             rateListLimit: 0,
-            // How often should the card refresh in seconds
             cardRefreshIntervalSeconds: 60
         };
 
